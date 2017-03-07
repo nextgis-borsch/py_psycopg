@@ -237,16 +237,16 @@ class psycopg_build_ext(build_ext):
         self.libraries.append("ws2_32")
         self.libraries.append("advapi32")
         if self.compiler_is_msvc():
-            # MSVC requires an explicit "libpq"
-            if "pq" in self.libraries:
-                self.libraries.remove("pq")
+        #    # MSVC requires an explicit "libpq"
+        #    if "pq" in self.libraries:
+        #        self.libraries.remove("pq")
             self.libraries.append("secur32")
-            self.libraries.append("libpq")
+        #    self.libraries.append("libpq")
             self.libraries.append("shfolder")
-            for path in self.library_dirs:
-                if os.path.isfile(os.path.join(path, "ms", "libpq.lib")):
-                    self.library_dirs.append(os.path.join(path, "ms"))
-                    break
+        #    for path in self.library_dirs:
+        #        if os.path.isfile(os.path.join(path, "ms", "libpq.lib")):
+        #            self.library_dirs.append(os.path.join(path, "ms"))
+        #            break
             if self.have_ssl:
                 self.libraries.append("openssl")
                 self.libraries.append("user32")
@@ -303,6 +303,9 @@ class psycopg_build_ext(build_ext):
                     "Error: could not determine PostgreSQL version from '%s'"
                                                                 % pgversion)
                 sys.exit(1)
+            
+            define_macros.append(("PG_VERSION_NUM", "%d%02d%02d" %
+                                  (pgmajor, pgminor, pgpatch))) 
 
             define_macros.append(("PG_VERSION_HEX", "0x%02X%02X%02X" %
                                   (pgmajor, pgminor, pgpatch)))
@@ -362,6 +365,9 @@ sources = [
     'adapter_pint.c', 'adapter_pfloat.c', 'adapter_qstring.c',
     'microprotocols.c', 'microprotocols_proto.c',
     'typecast.c',
+
+    'replication_cursor_type.c', 'replication_message_type.c', 'replication_connection_type.c', 'win32_support.c',
+    'libpq_support.c'
 ]
 
 depends = [
@@ -376,9 +382,13 @@ depends = [
     'microprotocols.h', 'microprotocols_proto.h',
     'typecast.h', 'typecast_binary.h',
 
+    'replication_cursor.h', 'replication_message.h', 'replication_connection.h', 'win32_support.h',
+    'libpq_support.h'
+
     # included sources
     'typecast_array.c', 'typecast_basic.c', 'typecast_binary.c',
     'typecast_builtins.c', 'typecast_datetime.c',
+
 ]
 
 parser = configparser.ConfigParser()
@@ -472,6 +482,9 @@ if sys.platform == 'darwin':
         os.environ['LDFLAGS'] += ' -framework @OPENSSL_FRAMEWORK@'
         extra_link_args.append('-Wl,-F@OPENSSL_FRAMEWORK_DIRS@')
     os.environ['LDFLAGS'] += ' -rpath \"@loader_path/../../../../Frameworks/\"'
+elif sys.platform == 'win32':
+    if have_ssl:
+        extra_link_args.append('/LIBPATH:@OPENSSL_LIB_DIRS@')
 
 ext.append(Extension("psycopg2._psycopg", sources,
                      define_macros=define_macros,

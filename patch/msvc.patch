@@ -1,0 +1,11 @@
+--- a/psycopg/config.h
++++ b/psycopg/config.h
+@@ -160,7 +160,7 @@ typedef unsigned __int64    uint64_t;
+         && (defined(__SunOS_5_8) || defined(__SunOS_5_9))
+ 
+ /* round has been added in the standard library with MSVC 2015 */
+-#if _MSC_VER < 1900
++#if _MSC_VER < 1800
+ static double round(double num)
+ {
+   return (num >= 0) ? floor(num + 0.5) : ceil(num - 0.5);

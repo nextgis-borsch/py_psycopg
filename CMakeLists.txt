@@ -146,19 +146,53 @@ if(OSX_FRAMEWORK)
     else()
         set(HAVE_SSL 0)
     endif()
+
 elseif(WIN32)
-    # TODO:
+    macro(get_lib_path_from_include PATH LIB_DIR)
+        get_filename_component(FW_DIR ${PATH} DIRECTORY)
+        set(${LIB_DIR} "${FW_DIR}/lib")
+    endmacro()
+    set(PQ_LIB pq)
+    set(POSTGRESQL_INCLUDE_SERVER_DIR ${POSTGRESQL_INCLUDE_DIR})
+    get_lib_path_from_include(${POSTGRESQL_INCLUDE_DIR} POSTGRESQL_LIBRARY_DIR)
+    set(PQ_LIB_DIRS ${POSTGRESQL_LIBRARY_DIR})
+    
+    if(OPENSSL_FOUND)
+        set(HAVE_SSL 1)
+        set(OPENSSL_LIB openssl)
+        get_lib_path_from_include(${OPENSSL_INCLUDE_DIR} OPENSSL_LIBRARY_DIR)
+        set(OPENSSL_LIB_DIRS ${OPENSSL_LIBRARY_DIR})
+    else()
+        set(HAVE_SSL 0)
+    endif()
+    
+    find_package(Git)
+    if(NOT GIT_FOUND)
+      message(FATAL_ERROR "git is required")
+    endif()
+
+    execute_process(COMMAND ${GIT_EXECUTABLE} apply -v --whitespace=fix ${CMAKE_CURRENT_SOURCE_DIR}/patch/msvc.patch
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
+    )
+    configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.cfg.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.cfg IMMEDIATE @ONLY)
+endif()
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.py.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py IMMEDIATE @ONLY)
+
+set(FLAGS)
+if(WIN32)
+    set(FLAGS ${FLAGS} "VS90COMNTOOLS=$ENV{VS120COMNTOOLS}")
 endif()
 
 macro(build_py ver)
     add_custom_target(build_py${ver} ALL
-        COMMAND ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py build_ext -b ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages
+        COMMAND ${CMAKE_COMMAND} -E env "${FLAGS}"
+        ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py build_ext -b ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
         VERBATIM
     )
 endmacro()
 
-configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.py.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py IMMEDIATE @ONLY)
 
 # python setup.py install --prefix=/usr/local
 status_message("Install")
@@ -246,6 +280,9 @@ else()
         set(BINDING_PATH ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages)
         install(DIRECTORY "${BINDING_PATH}/"
                 DESTINATION ${INSTALL_LIB_DIR}/Python${PYTHON${ver}_VERSION_MAJOR}${PYTHON${ver}_VERSION_MINOR}/site-packages
+                COMPONENT libraries)
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/lib/"
+                DESTINATION ${INSTALL_LIB_DIR}/Python${PYTHON${ver}_VERSION_MAJOR}${PYTHON${ver}_VERSION_MINOR}/site-packages/psycopg2
                 COMPONENT libraries)
     endmacro()
 
