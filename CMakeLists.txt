@@ -156,7 +156,7 @@ elseif(WIN32)
     set(POSTGRESQL_INCLUDE_SERVER_DIR ${POSTGRESQL_INCLUDE_DIR})
     get_lib_path_from_include(${POSTGRESQL_INCLUDE_DIR} POSTGRESQL_LIBRARY_DIR)
     set(PQ_LIB_DIRS ${POSTGRESQL_LIBRARY_DIR})
-    
+
     if(OPENSSL_FOUND)
         set(HAVE_SSL 1)
         set(OPENSSL_LIB openssl)
@@ -165,7 +165,7 @@ elseif(WIN32)
     else()
         set(HAVE_SSL 0)
     endif()
-    
+
     find_package(Git)
     if(NOT GIT_FOUND)
       message(FATAL_ERROR "git is required")
@@ -174,10 +174,10 @@ elseif(WIN32)
     execute_process(COMMAND ${GIT_EXECUTABLE} apply -v --whitespace=fix ${CMAKE_CURRENT_SOURCE_DIR}/patch/msvc.patch
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
     )
-    configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.cfg.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.cfg IMMEDIATE @ONLY)
 endif()
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.py.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py IMMEDIATE @ONLY)
+configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.cfg.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.cfg IMMEDIATE @ONLY)
 
 set(FLAGS)
 if(WIN32)
@@ -185,12 +185,21 @@ if(WIN32)
 endif()
 
 macro(build_py ver)
-    add_custom_target(build_py${ver} ALL
-        COMMAND ${CMAKE_COMMAND} -E env "${FLAGS}"
-        ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py build_ext -b ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
-        VERBATIM
-    )
+    if(WIN32)
+        add_custom_target(build_py${ver} ALL
+            COMMAND ${CMAKE_COMMAND} -E env "${FLAGS}" ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py build_ext -b ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
+            COMMENT "Run ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py"
+            VERBATIM
+        )
+    else()
+        add_custom_target(build_py${ver} ALL
+            COMMAND ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py build_ext -b ${CMAKE_CURRENT_BINARY_DIR}/${PYTHON${ver}_VERSION_MAJOR}.${PYTHON${ver}_VERSION_MINOR}/site-packages
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}
+            COMMENT "Run ${PYTHON${ver}_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py"
+            VERBATIM
+        )
+    endif()
 endmacro()
 
 

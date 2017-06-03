@@ -90,7 +90,7 @@ except ImportError:
 # Take a look at http://www.python.org/dev/peps/pep-0386/
 # for a consistent versioning pattern.
 
-PSYCOPG_VERSION = '2.6.2'
+PSYCOPG_VERSION = '@VERSION@'
 
 version_flags   = ['dt', 'dec']
 
@@ -303,9 +303,9 @@ class psycopg_build_ext(build_ext):
                     "Error: could not determine PostgreSQL version from '%s'"
                                                                 % pgversion)
                 sys.exit(1)
-            
+
             define_macros.append(("PG_VERSION_NUM", "%d%02d%02d" %
-                                  (pgmajor, pgminor, pgpatch))) 
+                                  (pgmajor, pgminor, pgpatch)))
 
             define_macros.append(("PG_VERSION_HEX", "0x%02X%02X%02X" %
                                   (pgmajor, pgminor, pgpatch)))
