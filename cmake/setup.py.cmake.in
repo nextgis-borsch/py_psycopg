@@ -284,7 +284,7 @@ class psycopg_build_ext(build_ext):
 
         try:
             self.library_dirs.append('@POSTGRESQL_LIBRARY_DIR@')
-            self.include_dirs.append('@POSTGRESQL_INCLUDE_DIR@')
+            self.include_dirs.append('@POSTGRESQL_INCLUDE_DIRS@')
             self.include_dirs.append('@POSTGRESQL_INCLUDE_SERVER_DIR@')
             pgversion = '@POSTGRESQL_VERSION@'
 
