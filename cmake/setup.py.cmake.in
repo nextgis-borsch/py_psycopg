@@ -282,11 +282,13 @@ class psycopg_build_ext(build_ext):
         else:
             self.libraries.append("pq")
 
+        include_dirs_str = '@POSTGRESQL_INCLUDE_DIRS@;@POSTGRESQL_INCLUDE_DIRS@'
+        include_dirs = include_dirs_str.split(';')
+
         try:
             self.library_dirs.append('@POSTGRESQL_LIBRARY_DIR@')
-            self.include_dirs.append('@POSTGRESQL_INCLUDE_DIRS@')
-            self.include_dirs.append('@POSTGRESQL_INCLUDE_SERVER_DIR@')
-            pgversion = '@POSTGRESQL_VERSION@'
+            self.include_dirs.extend(include_dirs)
+            pgversion = '@POSTGRESQL_VERSION@'    
 
             verre = re.compile(
                 r"(\d+)\.(\d+)(?:(?:\.(\d+))|(devel|(alpha|beta|rc)\d+))")
