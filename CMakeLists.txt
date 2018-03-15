@@ -200,7 +200,7 @@ elseif(WIN32)
     if(EXISTS ${CMAKE_BINARY_DIR}/third-party/install/lib)
         set(POSTGRESQL_LIBRARY_DIR ${CMAKE_BINARY_DIR}/third-party/install/lib)
     else()
-        get_lib_path_from_include(${POSTGRESQL_INCLUDE_DIR} POSTGRESQL_LIBRARY_DIR)
+        get_lib_path_from_include(${POSTGRESQL_INCLUDE_DIRS} POSTGRESQL_LIBRARY_DIR)
     endif()
 
     if(OPENSSL_FOUND)
