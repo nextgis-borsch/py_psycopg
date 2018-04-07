@@ -144,10 +144,6 @@ else()
     set(FLAGS "NextGIS=TRUE")
 endif()
 
-foreach(LIB_DIR ${YAML_LIBRARIES})
-    set(BUILD_INCLUDES ${BUILD_INCLUDES} "-L$<TARGET_LINKER_FILE_DIR:${LIB_DIR}>")
-endforeach()
-
 # Download tarbal
 set(OUT_DIR_NAME ${PROJECT_NAME}-${VERSION})
 set(OUT_NAME "${OUT_DIR_NAME}.tar.gz")
@@ -270,7 +266,6 @@ except ImportError:
         VERBATIM
     )
 endmacro()
-configure_file(${CMAKE_SOURCE_DIR}/cmake/setup.py.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${OUT_DIR_NAME}/setup.py IMMEDIATE @ONLY)
 
 if(PYTHON2_EXECUTABLE)
     build_py(2)
