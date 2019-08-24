@@ -1,6 +1,6 @@
 # setup.py - distutils packaging
 #
-# Copyright (C) 2003-2010 Federico Di Gregorio  <fog@debian.org>
+# Copyright (C) 2003-2019 Federico Di Gregorio  <fog@debian.org>
 #
 # psycopg2 is free software: you can redistribute it and/or modify it
 # under the terms of the GNU Lesser General Public License as published
@@ -25,6 +25,31 @@ UPDATEs. psycopg2 also provide full asynchronous operations and support
 for coroutine libraries.
 """
 
+# Note: The setup.py must be compatible with both Python 2 and 3
+
+
+import os
+import sys
+import re
+import subprocess
+from setuptools import setup, Extension
+from distutils.command.build_ext import build_ext
+from distutils.sysconfig import get_python_inc
+from distutils.ccompiler import get_default_compiler
+from distutils.errors import CompileError
+from distutils.util import get_platform
+
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
+
+# Take a look at https://www.python.org/dev/peps/pep-0440/
+# for a consistent versioning pattern.
+
+PSYCOPG_VERSION = '@VERSION@'
+
+
 # note: if you are changing the list of supported Python version please fix
 # the docs in install.rst and the /features/ page on the website.
 classifiers = """\
@@ -33,15 +58,14 @@ Intended Audience :: Developers
 License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
-Programming Language :: Python :: 2.5
-Programming Language :: Python :: 2.6
+Programming Language :: Python :: 2
 Programming Language :: Python :: 2.7
 Programming Language :: Python :: 3
-Programming Language :: Python :: 3.1
-Programming Language :: Python :: 3.2
-Programming Language :: Python :: 3.3
 Programming Language :: Python :: 3.4
 Programming Language :: Python :: 3.5
+Programming Language :: Python :: 3.6
+Programming Language :: Python :: 3.7
+Programming Language :: Python :: Implementation :: CPython
 Programming Language :: C
 Programming Language :: SQL
 Topic :: Database
@@ -52,63 +76,9 @@ Operating System :: Microsoft :: Windows
 Operating System :: Unix
 """
 
-# Note: The setup.py must be compatible with both Python 2 and 3
-
-import os
-import sys
-import re
-import subprocess
-try:
-    from setuptools import setup, Extension
-except ImportError:
-    from distutils.core import setup, Extension
-from distutils.command.build_ext import build_ext
-from distutils.sysconfig import get_python_inc
-from distutils.ccompiler import get_default_compiler
-from distutils.util import get_platform
-
-try:
-    from distutils.command.build_py import build_py_2to3
-except ImportError:
-    from distutils.command.build_py import build_py
-else:
-    class build_py(build_py_2to3):
-        # workaround subclass for ticket #153
-        pass
-
-    # Configure distutils to run our custom 2to3 fixers as well
-    from lib2to3.refactor import get_fixers_from_package
-    build_py.fixer_names = get_fixers_from_package('lib2to3.fixes') \
-        + [ 'fix_b' ]
-    sys.path.insert(0, 'scripts')
-
-try:
-    import configparser
-except ImportError:
-    import ConfigParser as configparser
-
-# Take a look at http://www.python.org/dev/peps/pep-0386/
-# for a consistent versioning pattern.
-
-PSYCOPG_VERSION = '@VERSION@'
-
-version_flags   = ['dt', 'dec']
+version_flags = ['dt', 'dec']
 
 PLATFORM_IS_WINDOWS = sys.platform.lower().startswith('win')
-
-
-class PostgresConfig:
-    def __init__(self, build_ext):
-        self.build_ext = build_ext
-
-    def find_on_path(self, exename, path_directories=None):
-        if not path_directories:
-            path_directories = os.environ['PATH'].split(os.pathsep)
-        for dir_name in path_directories:
-            fullpath = os.path.join(dir_name, exename)
-            if os.path.isfile(fullpath):
-                return fullpath
-        return None
 
 class psycopg_build_ext(build_ext):
     """Conditionally complement the setup.cfg options file.
@@ -124,6 +94,8 @@ class psycopg_build_ext(build_ext):
     user_options.extend([
         ('use-pydatetime', None,
          "Use Python datatime objects for date and time representation."),
+        ('pg-config=', None,
+         "The name of the pg_config binary and/or full path to find it"),
         ('have-ssl', None,
          "Compile with OpenSSL built PostgreSQL libraries (Windows only)."),
         ('static-libpq', None,
@@ -138,12 +110,11 @@ class psycopg_build_ext(build_ext):
 
     def initialize_options(self):
         build_ext.initialize_options(self)
-        self.use_pg_dll = 1
         self.pgdir = None
         self.mx_include_dir = None
-        self.use_pydatetime = 1
         self.have_ssl = have_ssl
         self.static_libpq = static_libpq
+        self.pg_config = None
 
     def compiler_is_msvc(self):
         return self.get_compiler_name().lower().startswith('msvc')
@@ -175,13 +146,42 @@ class psycopg_build_ext(build_ext):
         else:
             return build_ext.get_export_symbols(self, extension)
 
+    built_files = 0
+
     def build_extension(self, extension):
-        build_ext.build_extension(self, extension)
+        # Count files compiled to print the binary blurb only if the first fails
+        compile_orig = getattr(self.compiler, '_compile', None)
+        if compile_orig is not None:
+            def _compile(*args, **kwargs):
+                rv = compile_orig(*args, **kwargs)
+                psycopg_build_ext.built_files += 1
+                return rv
+
+            self.compiler._compile = _compile
+
+        try:
+            build_ext.build_extension(self, extension)
+            psycopg_build_ext.built_files += 1
+        except CompileError:
+            if self.built_files == 0:
+                sys.stderr.write("""
+It appears you are missing some prerequisite to build the package from source.
+
+You may install a binary package by installing 'psycopg2-binary' from PyPI.
+If you want to install psycopg2 from source, please install the packages
+required for the build and try again.
+
+For further information please check the 'doc/src/install.rst' file (also at
+<http://initd.org/psycopg/docs/install.html>).
+
+""")
+            raise
+
         sysVer = sys.version_info[:2]
 
         # For Python versions that use MSVC compiler 2008, re-insert the
         # manifest into the resulting .pyd file.
-        if self.compiler_is_msvc() and sysVer not in ((2, 4), (2, 5)):
+        if self.compiler_is_msvc() and sysVer == (2, 7):
             platform = get_platform()
             # Default to the x86 manifest
             manifest = '_psycopg.vc9.x86.manifest'
@@ -203,7 +203,6 @@ class psycopg_build_ext(build_ext):
 
     def finalize_win32(self):
         """Finalize build system configuration on win32 platform."""
-        sysVer = sys.version_info[:2]
 
         # Add compiler-specific arguments:
         extra_compiler_args = []
@@ -219,17 +218,6 @@ class psycopg_build_ext(build_ext):
             # API code.
             extra_compiler_args.append('-fno-strict-aliasing')
 
-            # Force correct C runtime library linkage:
-            if sysVer <= (2, 3):
-                # Yes:  'msvcr60', rather than 'msvcrt', is the correct value
-                # on the line below:
-                self.libraries.append('msvcr60')
-            elif sysVer in ((2, 4), (2, 5)):
-                self.libraries.append('msvcr71')
-            # Beyond Python 2.5, we take our chances on the default C runtime
-            # library, because we don't know what compiler those future
-            # versions of Python will use.
-
         for extension in ext:  # ext is a global list of Extension objects
             extension.extra_compile_args.extend(extra_compiler_args)
         # End of add-compiler-specific arguments section.
@@ -237,25 +225,21 @@ class psycopg_build_ext(build_ext):
         self.libraries.append("ws2_32")
         self.libraries.append("advapi32")
         if self.compiler_is_msvc():
-        #    # MSVC requires an explicit "libpq"
-        #    if "pq" in self.libraries:
-        #        self.libraries.remove("pq")
+            # MSVC requires an explicit "libpq"
+            if "pq" in self.libraries:
+                self.libraries.remove("pq")
             self.libraries.append("secur32")
-        #    self.libraries.append("libpq")
+            self.libraries.append("libpq")
             self.libraries.append("shfolder")
-        #    for path in self.library_dirs:
-        #        if os.path.isfile(os.path.join(path, "ms", "libpq.lib")):
-        #            self.library_dirs.append(os.path.join(path, "ms"))
-        #            break
+            for path in self.library_dirs:
+                if os.path.isfile(os.path.join(path, "ms", "libpq.lib")):
+                    self.library_dirs.append(os.path.join(path, "ms"))
+                    break
             if self.have_ssl:
                 self.libraries.append("openssl")
+                self.libraries.append("crypt32")
                 self.libraries.append("user32")
                 self.libraries.append("gdi32")
-
-    # def finalize_darwin(self):
-    #     """Finalize build system configuration on darwin platform."""
-        # self.libraries.append('ssl')
-        # self.libraries.append('crypto')
 
     def finalize_linux(self):
         """Finalize build system configuration on GNU/Linux platform."""
@@ -269,47 +253,43 @@ class psycopg_build_ext(build_ext):
 
     def finalize_options(self):
         """Complete the build system configuration."""
+        # An empty option in the setup.cfg causes self.libraries to include
+        # an empty string in the list of libraries
+        if self.libraries is not None and not self.libraries.strip():
+            self.libraries = None
+
         build_ext.finalize_options(self)
 
-        pg_config_helper = PostgresConfig(self)
-
         self.include_dirs.append(".")
-        if self.static_libpq:
-            if not getattr(self, 'link_objects', None):
-                self.link_objects = []
-            self.link_objects.append(
-                    os.path.join(pg_config_helper.query("libdir"), "libpq.a"))
-        else:
-            self.libraries.append("pq")
-
-        include_dirs_str = '@POSTGRESQL_INCLUDE_DIRS@;@POSTGRESQL_INCLUDE_DIRS@'
-        include_dirs = include_dirs_str.split(';')
+        self.include_dirs.append('@POSTGRESQL_INCLUDE_DIRS@')
+        self.libraries.append("@POSTGRESQL_LIBRARIES@")
 
         try:
             self.library_dirs.append('@POSTGRESQL_LIBRARY_DIR@')
-            self.include_dirs.extend(include_dirs)
-            pgversion = '@POSTGRESQL_VERSION@'    
+            pgversion = '@POSTGRESQL_VERSION@'
 
             verre = re.compile(
-                r"(\d+)\.(\d+)(?:(?:\.(\d+))|(devel|(alpha|beta|rc)\d+))")
+                r"(\d+)(?:\.(\d+))?(?:(?:\.(\d+))|(devel|(?:alpha|beta|rc)\d+))?")
             m = verre.match(pgversion)
             if m:
                 pgmajor, pgminor, pgpatch = m.group(1, 2, 3)
+                # Postgres >= 10 doesn't have pgminor anymore.
+                pgmajor = int(pgmajor)
+                if pgmajor >= 10:
+                    pgminor, pgpatch = None, pgminor
+                if pgminor is None or not pgminor.isdigit():
+                    pgminor = 0
                 if pgpatch is None or not pgpatch.isdigit():
                     pgpatch = 0
-                pgmajor = int(pgmajor)
                 pgminor = int(pgminor)
                 pgpatch = int(pgpatch)
             else:
                 sys.stderr.write(
                     "Error: could not determine PostgreSQL version from '%s'"
-                                                                % pgversion)
+                    % pgversion)
                 sys.exit(1)
 
             define_macros.append(("PG_VERSION_NUM", "%d%02d%02d" %
-                                  (pgmajor, pgminor, pgpatch)))
-
-            define_macros.append(("PG_VERSION_HEX", "0x%02X%02X%02X" %
                                   (pgmajor, pgminor, pgpatch)))
 
             # enable lo64 if libpq >= 9.3 and Python 64 bits
@@ -334,6 +314,7 @@ class psycopg_build_ext(build_ext):
         if hasattr(self, "finalize_" + sys.platform):
             getattr(self, "finalize_" + sys.platform)()
 
+
 def is_py_64():
     # sys.maxint not available since Py 3.1;
     # sys.maxsize not available before Py 2.6;
@@ -355,10 +336,14 @@ data_files = []
 sources = [
     'psycopgmodule.c',
     'green.c', 'pqpath.c', 'utils.c', 'bytes_format.c',
+    'libpq_support.c', 'win32_support.c', 'solaris_support.c',
 
     'connection_int.c', 'connection_type.c',
-    'cursor_int.c', 'cursor_type.c',
-    'diagnostics_type.c', 'error_type.c',
+    'cursor_int.c', 'cursor_type.c', 'column_type.c',
+    'replication_connection_type.c',
+    'replication_cursor_type.c',
+    'replication_message_type.c',
+    'diagnostics_type.c', 'error_type.c', 'conninfo_type.c',
     'lobject_int.c', 'lobject_type.c',
     'notify_type.c', 'xid_type.c',
 
@@ -367,46 +352,40 @@ sources = [
     'adapter_pint.c', 'adapter_pfloat.c', 'adapter_qstring.c',
     'microprotocols.c', 'microprotocols_proto.c',
     'typecast.c',
-
-    'replication_cursor_type.c', 'replication_message_type.c', 'replication_connection_type.c', 'win32_support.c',
-    'libpq_support.c'
 ]
 
 depends = [
     # headers
     'config.h', 'pgtypes.h', 'psycopg.h', 'python.h', 'connection.h',
     'cursor.h', 'diagnostics.h', 'error.h', 'green.h', 'lobject.h',
-    'notify.h', 'pqpath.h', 'xid.h',
+    'replication_connection.h',
+    'replication_cursor.h',
+    'replication_message.h',
+    'notify.h', 'pqpath.h', 'xid.h', 'column.h', 'conninfo.h',
+    'libpq_support.h', 'win32_support.h', 'utils.h',
 
     'adapter_asis.h', 'adapter_binary.h', 'adapter_datetime.h',
     'adapter_list.h', 'adapter_pboolean.h', 'adapter_pdecimal.h',
     'adapter_pint.h', 'adapter_pfloat.h', 'adapter_qstring.h',
     'microprotocols.h', 'microprotocols_proto.h',
-    'typecast.h', 'typecast_binary.h',
-
-    'replication_cursor.h', 'replication_message.h', 'replication_connection.h', 'win32_support.h',
-    'libpq_support.h'
+    'typecast.h', 'typecast_binary.h', 'sqlstate_errors.h',
 
     # included sources
     'typecast_array.c', 'typecast_basic.c', 'typecast_binary.c',
     'typecast_builtins.c', 'typecast_datetime.c',
-
 ]
 
 parser = configparser.ConfigParser()
 parser.read('setup.cfg')
 
-# Choose a datetime module
-have_pydatetime = True
-have_mxdatetime = False
-use_pydatetime  = int(parser.get('build_ext', 'use_pydatetime'))
-
 # check for mx package
+have_mxdatetime = False
+mxincludedir = ''
 if parser.has_option('build_ext', 'mx_include_dir'):
     mxincludedir = parser.get('build_ext', 'mx_include_dir')
-else:
+if not mxincludedir:
     mxincludedir = os.path.join(get_python_inc(plat_specific=1), "mx")
-if os.path.exists(mxincludedir):
+if mxincludedir.strip() and os.path.exists(mxincludedir):
     # Build the support for mx: we will check at runtime if it can be imported
     include_dirs.append(mxincludedir)
     define_macros.append(('HAVE_MXDATETIME', '1'))
@@ -415,48 +394,26 @@ if os.path.exists(mxincludedir):
     have_mxdatetime = True
     version_flags.append('mx')
 
-# now decide which package will be the default for date/time typecasts
-if have_pydatetime and (use_pydatetime or not have_mxdatetime):
-    define_macros.append(('PSYCOPG_DEFAULT_PYDATETIME', '1'))
-elif have_mxdatetime:
-    define_macros.append(('PSYCOPG_DEFAULT_MXDATETIME', '1'))
-else:
-    error_message = """\
-psycopg requires a datetime module:
-    mx.DateTime module not found
-    python datetime module not found
-
-Note that psycopg needs the module headers and not just the module
-itself. If you installed Python or mx.DateTime from a binary package
-you probably need to install its companion -dev or -devel package."""
-
-    for line in error_message.split("\n"):
-        sys.stderr.write("error: " + line)
-    sys.exit(1)
-
 # generate a nice version string to avoid confusion when users report bugs
-version_flags.append('pq3') # no more a choice
-version_flags.append('ext') # no more a choice
+version_flags.append('pq3')     # no more a choice
+version_flags.append('ext')     # no more a choice
 
 if version_flags:
     PSYCOPG_VERSION_EX = PSYCOPG_VERSION + " (%s)" % ' '.join(version_flags)
 else:
     PSYCOPG_VERSION_EX = PSYCOPG_VERSION
 
-if not PLATFORM_IS_WINDOWS:
-    define_macros.append(('PSYCOPG_VERSION', '"' + PSYCOPG_VERSION_EX + '"'))
-else:
-    define_macros.append(('PSYCOPG_VERSION', '\\"' + PSYCOPG_VERSION_EX + '\\"'))
+define_macros.append(('PSYCOPG_VERSION', PSYCOPG_VERSION_EX))
 
 if parser.has_option('build_ext', 'have_ssl'):
-    have_ssl = int(parser.get('build_ext', 'have_ssl'))
+    have_ssl = parser.getboolean('build_ext', 'have_ssl')
 else:
-    have_ssl = @HAVE_SSL@
+    have_ssl = False
 
 if parser.has_option('build_ext', 'static_libpq'):
-    static_libpq = int(parser.get('build_ext', 'static_libpq'))
+    static_libpq = parser.getboolean('build_ext', 'static_libpq')
 else:
-    static_libpq = 0
+    static_libpq = False
 
 # And now... explicitly add the defines from the .cfg files.
 # Looks like setuptools or some other cog doesn't add them to the command line
@@ -468,8 +425,9 @@ for define in parser.get('build_ext', 'define').split(','):
 
 # build the extension
 
-sources = [ os.path.join('psycopg', x) for x in sources]
-depends = [ os.path.join('psycopg', x) for x in depends]
+sources = [os.path.join('psycopg', x) for x in sources]
+depends = [os.path.join('psycopg', x) for x in depends]
+
 extra_link_args = []
 
 if sys.platform == 'darwin':
@@ -497,18 +455,16 @@ ext.append(Extension("psycopg2._psycopg", sources,
                      undef_macros=[]))
 
 # Compute the direct download url.
-# Note that the current package installation programs are stupidly intelligent
-# and will try to install a beta if they find a link in the homepage instead of
-# using these pretty metadata. But that's their problem, not ours.
 download_url = (
     "http://initd.org/psycopg/tarballs/PSYCOPG-%s/psycopg2-%s.tar.gz"
-    % ('-'.join(PSYCOPG_VERSION.split('.')[:2]), PSYCOPG_VERSION))
+    % (re.sub(r'^(\d+)\.(\d+).*', r'\1-\2', PSYCOPG_VERSION),
+        PSYCOPG_VERSION))
 
 try:
     f = open("README.rst")
     readme = f.read()
     f.close()
-except:
+except Exception:
     print("failed to read readme: ignoring...")
     readme = __doc__
 
@@ -522,13 +478,16 @@ setup(name="psycopg2",
       download_url=download_url,
       license="LGPL with exceptions or ZPL",
       platforms=["any"],
+      python_requires='>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*',
       description=readme.split("\n")[0],
       long_description="\n".join(readme.split("\n")[2:]).lstrip(),
       classifiers=[x for x in classifiers.split("\n") if x],
       data_files=data_files,
-      package_dir={'psycopg2': 'lib', 'psycopg2.tests': 'tests'},
-      packages=['psycopg2', 'psycopg2.tests'],
-      cmdclass={
-          'build_ext': psycopg_build_ext,
-          'build_py': build_py, },
-      ext_modules=ext)
+      package_dir={'psycopg2': 'lib'},
+      packages=['psycopg2'],
+      cmdclass={'build_ext': psycopg_build_ext},
+      ext_modules=ext,
+      project_urls={
+          'Source': 'https://github.com/psycopg/psycopg2',
+          'Documentation': 'http://initd.org/psycopg/docs/',
+      })
