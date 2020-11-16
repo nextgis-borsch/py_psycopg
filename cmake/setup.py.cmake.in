@@ -262,7 +262,8 @@ For further information please check the 'doc/src/install.rst' file (also at
 
         self.include_dirs.append(".")
         self.include_dirs.append('@POSTGRESQL_INCLUDE_DIRS@')
-        self.libraries.append("@POSTGRESQL_LIBRARIES@")
+        if sys.platform != 'darwin':
+            self.libraries.append("@POSTGRESQL_LIBRARIES@")
 
         try:
             self.library_dirs.append('@POSTGRESQL_LIBRARY_DIR@')
@@ -436,11 +437,11 @@ if sys.platform == 'darwin':
         #extra_compile_args.append('-Qunused-arguments')
         os.environ['ARCHFLAGS'] = '-Wno-error=unused-command-line-argument-hard-error-in-future'
     extra_link_args.extend(['-mmacosx-version-min=@CMAKE_OSX_DEPLOYMENT_TARGET@'])
-    os.environ['LDFLAGS'] = '' # '-framework @PQ_FRAMEWORK@'
+    os.environ['LDFLAGS'] = '-framework @PQ_FRAMEWORK@'
     extra_link_args.append('-Wl,-F@PQ_FRAMEWORK_DIRS@')
 
     if have_ssl:
-    #    os.environ['LDFLAGS'] += ' -framework @OPENSSL_FRAMEWORK@'
+        os.environ['LDFLAGS'] += ' -framework @OPENSSL_FRAMEWORK@'
         extra_link_args.append('-Wl,-F@OPENSSL_FRAMEWORK_DIRS@')
     os.environ['LDFLAGS'] += ' -rpath \"@loader_path/../../../../Frameworks/\"'
 elif sys.platform == 'win32':
